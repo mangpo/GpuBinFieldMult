@@ -1,5 +1,5 @@
 #ifndef SIZE
-#define SIZE 64
+#define SIZE 384
 #endif
 
 #ifndef REPETITIONS

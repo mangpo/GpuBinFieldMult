@@ -141,10 +141,11 @@ __device__ inline void finiteFieldMultiply<32>(
 
 	unsigned my_ans[2]={0};
 	int b;
+	unsigned mask = __activemask();
 	for(unsigned k = 0 ; k < WARP_SIZE ; ++k){
 		b= (myIdx>= k);
-		my_ans[0] ^= (b*__shfl_up(a_reg,k)) & __shfl(e_reg,k);
-		my_ans[1] ^= ((1-b)*__shfl_down(a_reg,WARP_SIZE-k))& __shfl(e_reg,k);
+		my_ans[0] ^= (b*__shfl_up_sync(mask, a_reg,k)) & __shfl_sync(mask, e_reg,k);
+		my_ans[1] ^= ((1-b)*__shfl_down_sync(mask, a_reg,WARP_SIZE-k))& __shfl_sync(mask, e_reg,k);
 	}
 
 	unsigned int c = 0;
@@ -154,14 +155,14 @@ __device__ inline void finiteFieldMultiply<32>(
 		b = (myIdx < 16);
 		c = (myIdx >= pentanomial[i]) & (myIdx < pentanomial[i] + 16);
 
-		my_ans[1] ^= ( b * c *__shfl(my_ans[1],16+myIdx-pentanomial[i]));
-		my_ans[0]^=((1-b)* c *__shfl(my_ans[1],pentanomial[i]));
+		my_ans[1] ^= ( b * c *__shfl_sync(mask, my_ans[1],16+myIdx-pentanomial[i]));
+		my_ans[0]^=((1-b)* c *__shfl_sync(mask, my_ans[1],pentanomial[i]));
 	}
 	myIdx = (myIdx + 16) & (WARP_SIZE - 1);
 #pragma unroll 4
 	for(unsigned int i = 0 ; i < 4 ; ++i){
 		c = (myIdx >= pentanomial[i]) & (myIdx < pentanomial[i] + 16);
-		my_ans[0] ^= (c * __shfl(my_ans[1],myIdx-pentanomial[i]));
+		my_ans[0] ^= (c * __shfl_sync(mask, my_ans[1],myIdx-pentanomial[i]));
 	}
 		cChunk[myIdx] = my_ans[0];
 }
@@ -329,17 +330,18 @@ __device__ inline void multiply64Shuffle(
 	unsigned my_ans[2][2]={0};
 
 	int b;
+	unsigned mask = __activemask();
 	for(unsigned k = 0 ; k < WARP_SIZE ; ++k){
 		b= (myIdx>= k);
-		my_ans[0][0] ^= (b*__shfl_up(a0,k)) & __shfl(b0,k);
-		my_ans[0][1] ^= ((1-b)*__shfl_down(a0,WARP_SIZE-k))& __shfl(b0,k);
-		my_ans[0][1] ^= (b*__shfl_up(a1,k)) & __shfl(b0,k);
-		my_ans[1][0] ^= ((1-b)*__shfl_down(a1,32-k))& __shfl(b0,k);
+		my_ans[0][0] ^= (b*__shfl_up_sync(mask, a0,k)) & __shfl_sync(mask, b0,k);
+		my_ans[0][1] ^= ((1-b)*__shfl_down_sync(mask, a0,WARP_SIZE-k))& __shfl_sync(mask,b0,k);
+		my_ans[0][1] ^= (b*__shfl_up_sync(mask,a1,k)) & __shfl_sync(mask,b0,k);
+		my_ans[1][0] ^= ((1-b)*__shfl_down_sync(mask,a1,32-k))& __shfl_sync(mask,b0,k);
 
-		my_ans[0][1] ^= (b*__shfl_up(a0,k)) & __shfl(b1,k);
-		my_ans[1][0] ^= ((1-b)*__shfl_down(a0,32-k))& __shfl(b1,k);
-		my_ans[1][0] ^= (b*__shfl_up(a1,k)) & __shfl(b1,k);
-		my_ans[1][1] ^= ((1-b)*__shfl_down(a1,32-k))& __shfl(b1,k);
+		my_ans[0][1] ^= (b*__shfl_up_sync(mask,a0,k)) & __shfl_sync(mask,b1,k);
+		my_ans[1][0] ^= ((1-b)*__shfl_down_sync(mask,a0,32-k))& __shfl_sync(mask,b1,k);
+		my_ans[1][0] ^= (b*__shfl_up_sync(mask,a1,k)) & __shfl_sync(mask,b1,k);
+		my_ans[1][1] ^= ((1-b)*__shfl_down_sync(mask,a1,32-k))& __shfl_sync(mask,b1,k);
 	}
 
 	cChunk[myIdx] ^= my_ans[0][0];
@@ -365,10 +367,10 @@ __device__ inline void multiply64ShuffleMP(
   for(unsigned k = 0 ; k < WARP_SIZE ; ++k){
     b= (myIdx>= k);
     /*
-    unsigned int my_a0 = __shfl_up(a0,(b)? k: WARP_SIZE-k);
-    unsigned int my_a1 = __shfl_up(a1,(b)? k: WARP_SIZE-k);
-    unsigned int my_b0 = __shfl(b0,k);
-    unsigned int my_b1 = __shfl(b1,k);
+    unsigned int my_a0 = __shfl_up_sync(mask,a0,(b)? k: WARP_SIZE-k);
+    unsigned int my_a1 = __shfl_up_sync(mask,a1,(b)? k: WARP_SIZE-k);
+    unsigned int my_b0 = __shfl_sync(mask,b0,k);
+    unsigned int my_b1 = __shfl_sync(mask,b1,k);
     */
     unsigned int my_a0 = __shfl_sync(mask, a0,(b)? myIdx-k: myIdx+WARP_SIZE-k);
     unsigned int my_a1 = __shfl_sync(mask, a1,(b)? myIdx-k: myIdx+WARP_SIZE-k);
@@ -552,10 +554,11 @@ __device__ void polynomialMultiplication32Shuffle(
 	unsigned int aReg = a[myIdxInWarp];
 	unsigned int bReg = b[myIdxInWarp];
 	unsigned int cReg[2] = {0};
+	unsigned mask = __activemask();
 	for (unsigned int i = 0  ; i < 32 ; ++i)
 	{
-		unsigned int readB = __shfl(bReg, (myIdxInWarp - i) % WARP_SIZE);
-		unsigned int readA = __shfl(aReg, i);
+		unsigned int readB = __shfl_sync(mask,bReg, (myIdxInWarp - i) % WARP_SIZE);
+		unsigned int readA = __shfl_sync(mask,aReg, i);
 		if (i <= myIdxInWarp)
 		{
 			cReg[0] ^= readB&readA;
@@ -613,6 +616,7 @@ __device__ void polynomialMultiplication64Based32Shuffle(
 {
 	unsigned int myIdxInWarp = myIdxInGroup & (WARP_SIZE - 1);
 	unsigned int aReg = a[myIdxInGroup];
+	unsigned mask = __activemask();
 //#pragma unroll
 	for (unsigned int j = 0 ; j < 2 ; ++j)
 	{
@@ -621,8 +625,8 @@ __device__ void polynomialMultiplication64Based32Shuffle(
 //#pragma unroll
 		for (unsigned int i = 0 ; i < 32 ; ++i)
 		{
-			unsigned int readB = __shfl(bReg, (myIdxInWarp - i) % WARP_SIZE);
-			unsigned int readA = __shfl(aReg, i);
+			unsigned int readB = __shfl_sync(mask,bReg, (myIdxInWarp - i) % WARP_SIZE);
+			unsigned int readA = __shfl_sync(mask,aReg, i);
 			if (i <= myIdxInWarp)
 			{
 				cReg[0] ^= readB&readA;
@@ -652,14 +656,15 @@ __device__ void polynomialMultiplication64Shuffle(
 	unsigned int a0 = aInput[myIdx];
 	unsigned int b0 = bInput[myIdx];
 	unsigned int my_ans[2][2] = {0};
+	unsigned mask = __activemask();
 #pragma unroll
 	for(unsigned k = 0 ; k < WARP_SIZE ; ++k){
-		unsigned int bLo = __shfl(b0,k);
-		unsigned int bHi = __shfl(b1,k);
-		unsigned int aLok = __shfl_up(a0,k);
-		unsigned int aHik = __shfl_up(a1,k);
-		unsigned int aLoInv = __shfl_down(a0,WARP_SIZE-k);
-		unsigned int aHiInv = __shfl_down(a1,32-k);
+		unsigned int bLo = __shfl_sync(mask,b0,k);
+		unsigned int bHi = __shfl_sync(mask,b1,k);
+		unsigned int aLok = __shfl_up_sync(mask,a0,k);
+		unsigned int aHik = __shfl_up_sync(mask,a1,k);
+		unsigned int aLoInv = __shfl_down_sync(mask,a0,WARP_SIZE-k);
+		unsigned int aHiInv = __shfl_down_sync(mask,a1,32-k);
 		if (myIdx >= k)
 		{
 			my_ans[0][0] ^= aLok & bLo;
