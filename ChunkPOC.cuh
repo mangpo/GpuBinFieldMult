@@ -8,7 +8,8 @@
 #ifndef CHUNKPOC_CUH_
 #define CHUNKPOC_CUH_
 
-#define SHUFFLE
+//#define MP
+//#define SHUFFLE
 
 #define TYPE 1
 #if TYPE == 2
@@ -202,9 +203,19 @@ __device__ inline void finiteFieldMultiply(
 			bChunk[64*i + myIdxInWarp + WARP_SIZE] = 0;
 		}
 		__syncthreads();
+#ifndef MP
+		multiply64Shuffle(&aChunk[64*(i+warpInGroup)], myIdxInWarp, my_a[0], my_a[1], my_b[0], my_b[1]);
+#else
 		multiply64ShuffleMPopt(&aChunk[64*(i+warpInGroup)], myIdxInWarp, my_a[0], my_a[1], my_b[0], my_b[1]);
+#endif
+		
+#else
+		
+#ifndef MP
+		multiply64Shmem(&aChunk[warpInGroup * 64], &bChunk[64*i], &temp[64*(i+warpInGroup)], myIdxInWarp);
 #else
 		multiply64ShmemMP(&aChunk[warpInGroup * 64], &bChunk[64*i], &temp[64*(i+warpInGroup)], myIdxInWarp);
+#endif
 #endif
 	}
 
