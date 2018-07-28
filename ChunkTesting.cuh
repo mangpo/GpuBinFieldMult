@@ -80,7 +80,7 @@ float testChunksMultiply(unsigned int size)
 			THREAD_BLOCK_SIZE(N)>>>
 			((unsigned int (*)[ROUNDED(N)])chunksA, reinterpret_cast<unsigned int (*)[ROUNDED(N)]>(chunksB), (unsigned int (*)[ROUNDED(N)])chunksA, size);
 	cudaEventRecord(end);
-	gpuErrchk(cudaPeekAtLastError());
+	//gpuErrchk(cudaPeekAtLastError());
 
 	cudaMemcpy(chunksAHost, chunksA, sizeof(unsigned int)*N*size, cudaMemcpyDeviceToHost);
 
@@ -136,7 +136,7 @@ float testChunksMultiply64Ring(unsigned int size)
 			MAX_THREADBLOCK_SIZE>>>
 			((unsigned int (*)[64])chunksA, reinterpret_cast<unsigned int (*)[64]>(chunksB), (unsigned int (*)[128])chunksC, size);
 	cudaEventRecord(end);
-	gpuErrchk(cudaPeekAtLastError());
+	//gpuErrchk(cudaPeekAtLastError());
 
 	cudaMemcpy(chunksCHost, chunksC, sizeof(unsigned int)*128*size, cudaMemcpyDeviceToHost);
 

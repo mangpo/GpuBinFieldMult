@@ -8,7 +8,7 @@
 #ifndef CHUNKPOC_CUH_
 #define CHUNKPOC_CUH_
 
-
+#define SHUFFLE
 
 #define TYPE 1
 #if TYPE == 2
@@ -50,7 +50,21 @@ __device__ inline void multiply64Shuffle(
 		const unsigned int a0,
 		const unsigned int a1,
 		const unsigned int b0,
-		const unsigned int b1);
+		const unsigned int b1e);
+__device__ inline void multiply64ShuffleMP(
+					   unsigned int* cChunk,
+					   const unsigned int myIdx,
+					   const unsigned int a0,
+					   const unsigned int a1,
+					   const unsigned int b0,
+					   const unsigned int b1);
+__device__ inline void multiply64ShuffleMPopt(
+					   unsigned int* cChunk,
+					   const unsigned int myIdx,
+					   const unsigned int a0,
+					   const unsigned int a1,
+					   const unsigned int b0,
+					   const unsigned int b1);
 
 /*
  * @Brief: Internal multiplication function.
@@ -65,6 +79,11 @@ __device__ inline void multiply64Shmem(
 		unsigned int* bChunk,
 		unsigned int* cChunk,
 		const unsigned int myIdx);
+__device__ inline void multiply64ShmemMP(
+					 unsigned int* aChunk,
+					 unsigned int* bChunk,
+					 unsigned int* cChunk,
+					 const unsigned int myIdx);
 
 /*
  * @Brief: Multiplies cChunk by the pentanomial of degree 64. Writes result to resChunk.
@@ -183,9 +202,9 @@ __device__ inline void finiteFieldMultiply(
 			bChunk[64*i + myIdxInWarp + WARP_SIZE] = 0;
 		}
 		__syncthreads();
-		multiply64Shuffle(&aChunk[64*(i+warpInGroup)], myIdxInWarp, my_a[0], my_a[1], my_b[0], my_b[1]);
+		multiply64ShuffleMPopt(&aChunk[64*(i+warpInGroup)], myIdxInWarp, my_a[0], my_a[1], my_b[0], my_b[1]);
 #else
-		multiply64Shmem(&aChunk[warpInGroup * 64], &bChunk[64*i], &temp[64*(i+warpInGroup)], myIdxInWarp);
+		multiply64ShmemMP(&aChunk[warpInGroup * 64], &bChunk[64*i], &temp[64*(i+warpInGroup)], myIdxInWarp);
 #endif
 	}
 
@@ -320,6 +339,89 @@ __device__ inline void multiply64Shuffle(
 	__syncthreads();
 }
 
+__device__ inline void multiply64ShuffleMP(
+					   unsigned int* cChunk,
+					   const unsigned int myIdx,
+					   const unsigned int a0,
+					   const unsigned int a1,
+					   const unsigned int b0,
+					   const unsigned int b1)
+{
+  unsigned my_ans[2][2]={0};
+  unsigned mask = __activemask();
+
+  int b;
+  for(unsigned k = 0 ; k < WARP_SIZE ; ++k){
+    b= (myIdx>= k);
+    /*
+    unsigned int my_a0 = __shfl_up(a0,(b)? k: WARP_SIZE-k);
+    unsigned int my_a1 = __shfl_up(a1,(b)? k: WARP_SIZE-k);
+    unsigned int my_b0 = __shfl(b0,k);
+    unsigned int my_b1 = __shfl(b1,k);
+    */
+    unsigned int my_a0 = __shfl_sync(mask, a0,(b)? myIdx-k: myIdx+WARP_SIZE-k);
+    unsigned int my_a1 = __shfl_sync(mask, a1,(b)? myIdx-k: myIdx+WARP_SIZE-k);
+    unsigned int my_b0 = __shfl_sync(mask, b0,k);
+    unsigned int my_b1 = __shfl_sync(mask, b1,k);
+
+    if(b) my_ans[0][0] ^= my_a0 & my_b0;
+    else my_ans[0][1] ^= my_a0 & my_b0;
+    if(b) my_ans[0][1] ^= my_a1 & my_b0;
+    else my_ans[1][0] ^= my_a1 & my_b0;
+
+    if(b) my_ans[0][1] ^= my_a0 & my_b1;
+    else my_ans[1][0] ^= my_a0 & my_b1;
+    if(b) my_ans[1][0] ^= my_a1 & my_b1;
+    else my_ans[1][1] ^= my_a1 & my_b1;
+  }
+
+  cChunk[myIdx] ^= my_ans[0][0];
+  cChunk[myIdx + warpSize] ^= my_ans[0][1];
+  __syncthreads();
+  cChunk[myIdx + 2*warpSize] ^= my_ans[1][0];
+  cChunk[myIdx + 3*warpSize] ^= my_ans[1][1];
+  __syncthreads();
+}
+
+__device__ inline void multiply64ShuffleMPopt(
+					   unsigned int* cChunk,
+					   const unsigned int myIdx,
+					   const unsigned int a0,
+					   const unsigned int a1,
+					   const unsigned int b0,
+					   const unsigned int b1)
+{
+  unsigned my_ans[2][2]={0};
+  unsigned mask = __activemask();
+
+  int lindex = myIdx;
+  int l1 = lindex;
+  int l3 = WARP_SIZE+lindex;
+  int b;
+  for(unsigned k = 0 ; k < WARP_SIZE ; ++k){
+    int lane = (k<=lindex)? l1: l3;
+    unsigned int my_a0 = __shfl_sync(mask, (lindex < WARP_SIZE-k)? a0: a1,lane);
+    unsigned int my_a1 = __shfl_sync(mask, (lindex < WARP_SIZE-k)? a1: a0,lane);
+    unsigned int my_b0 = __shfl_sync(mask, b0,k);
+    unsigned int my_b1 = __shfl_sync(mask, b1,k);
+
+    if(b) my_ans[0][0] ^= my_a0 & my_b0;
+    else my_ans[1][0] ^= my_a0 & my_b0;
+    my_ans[0][1] ^= my_a1 & my_b0;
+    my_ans[1][0] ^= my_a1 & my_b1;
+    if(b) my_ans[0][1] ^= my_a0 & my_b1;
+    else my_ans[1][1] ^= my_a0 & my_b1;
+    l1--; l3--;
+  }
+
+  cChunk[myIdx] ^= my_ans[0][0];
+  cChunk[myIdx + warpSize] ^= my_ans[0][1];
+  __syncthreads();
+  cChunk[myIdx + 2*warpSize] ^= my_ans[1][0];
+  cChunk[myIdx + 3*warpSize] ^= my_ans[1][1];
+  __syncthreads();
+}
+
 __device__ inline void multiplyByPentanomial(unsigned int* cChunk, unsigned int* resChunk, const unsigned int myIdx)
 {
 	unsigned int myC;
@@ -369,6 +471,47 @@ __device__ inline void multiply64Shmem(
 	cChunk[myIdx + 3*warpSize] ^= my_ans[1][1];
 	__syncthreads();
 }
+
+__device__ inline void multiply64ShmemMP(
+					 unsigned int* aChunk,
+					 unsigned int* bChunk,
+					 unsigned int* cChunk,
+					 const unsigned int myIdx)
+{
+  unsigned int b;
+  unsigned int my_ans[2][2] = {0};
+  for(unsigned k = 0 ; k < WARP_SIZE ; ++k){
+    b= (myIdx>= k);
+    unsigned int a1 = (b)? aChunk[myIdx - k]: aChunk[myIdx + 64 - k];
+    unsigned int a2 = aChunk[myIdx + 32-k];
+    unsigned int b1 = bChunk[k];
+    unsigned int b2 = bChunk[k + WARP_SIZE];
+    if (b)
+      {
+	my_ans[0][0] ^= a1 & b1;
+      }
+    else {
+      my_ans[1][0] ^= a1 & b1;
+    }
+    my_ans[0][1] ^= a2 & b1;
+    if (b)
+      {
+	my_ans[0][1] ^= a1 & b2;
+      }
+    else
+      {
+	my_ans[1][1] ^= a1 & b2;
+      }
+    my_ans[1][0] ^= a2 & b2;
+  }
+  cChunk[myIdx] ^= my_ans[0][0];
+  cChunk[myIdx + warpSize] ^= my_ans[0][1];
+  __syncthreads();
+  cChunk[myIdx + 2*warpSize] ^= my_ans[1][0];
+  cChunk[myIdx + 3*warpSize] ^= my_ans[1][1];
+  __syncthreads();
+}
+
 //----------------------------------------------------------------------
 // Polynomials multiplication implementation for GF(2^64)
 __device__ void polynomialMultiplication32Shmem(
