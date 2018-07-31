@@ -205,9 +205,9 @@ __device__ inline void finiteFieldMultiply(
 		}
 		__syncthreads();
 #ifndef MP
-		multiply64Shuffle(&aChunk[64*(i+warpInGroup)], myIdxInWarp, my_a[0], my_a[1], my_b[0], my_b[1]);
+		multiply64Shuffle(&temp[64*(i+warpInGroup)], myIdxInWarp, my_a[0], my_a[1], my_b[0], my_b[1]);
 #else
-		multiply64ShuffleMPopt(&aChunk[64*(i+warpInGroup)], myIdxInWarp, my_a[0], my_a[1], my_b[0], my_b[1]);
+		multiply64ShuffleMPopt(&temp[64*(i+warpInGroup)], myIdxInWarp, my_a[0], my_a[1], my_b[0], my_b[1]);
 #endif
 		
 #else
