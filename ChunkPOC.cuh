@@ -148,10 +148,12 @@ __device__ inline void finiteFieldMultiply<32>(
 	int l1 = myIdx;
 	int l2 = myIdx + WARP_SIZE;
 	for(unsigned k = 0 ; k < WARP_SIZE ; ++k){
+	  int aa = __shfl_sync(mask, a_reg,(myIdx>= k)? l1: l2);
+	  int bb = __shfl_sync(mask, e_reg,k);
 	  if(myIdx>= k)
-	    my_ans[0] ^= (__shfl_sync(mask, a_reg,l1)) & __shfl_sync(mask, e_reg,k);
+	    my_ans[0] ^= aa & bb;
 	  else
-	    my_ans[1] ^= (__shfl_sync(mask, a_reg,l2))& __shfl_sync(mask, e_reg,k);
+	    my_ans[1] ^= aa & bb;
 	  l1--; l2--;
 	}
 #else
@@ -202,13 +204,15 @@ __device__ inline void finiteFieldMultiply<32>(
   int l2 = myIdx+32;
   for (unsigned int i = 0 ; i < 32 ; ++i)
     {
+      int aa = (i <= myIdx)? aChunk[l1]: aChunk[l2];
+      int bb = bChunk[i];
       if (i <= myIdx)
 	{
-	  my_ans[0][myIdx] ^= bChunk[i] & aChunk[l1];
+	  my_ans[0][myIdx] ^= aa & bb;
 	}
       else
 	{
-	  my_ans[1][myIdx] ^= bChunk[i] & aChunk[l2];
+	  my_ans[1][myIdx] ^= aa & bb;
 	}
       l1--; l2--;
     }
