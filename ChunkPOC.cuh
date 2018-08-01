@@ -620,6 +620,7 @@ __device__ inline void multiply64ShuffleMPopt(
   int l3 = WARP_SIZE+lindex;
   int b;
   for(unsigned k = 0 ; k < WARP_SIZE ; ++k){
+    b= (myIdx>= k);
     int lane = (k<=lindex)? l1: l3;
     unsigned int my_a0 = __shfl_sync(mask, (lindex < WARP_SIZE-k)? a0: a1,lane);
     unsigned int my_a1 = __shfl_sync(mask, (lindex < WARP_SIZE-k)? a1: a0,lane);
