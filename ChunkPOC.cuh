@@ -229,7 +229,7 @@ __device__ inline void finiteFieldMultiply<32>(
 	}
     }
 #endif
-__syncthreads();
+    __syncthreads();
   
   unsigned int c = 0;
   int b = 0;
@@ -257,7 +257,126 @@ __syncthreads();
 }
 #endif
 
+#ifndef SHUFFLE
+template<>
+__device__ inline void finiteFieldMultiply<16>(
+	unsigned int aChunk[32],
+	unsigned int bChunk[32],
+	unsigned int cChunk[32],
+	unsigned int temp[64],
+	unsigned int myIdxInGroup,
+	unsigned int myIdx,
+	unsigned int warpInGroup)
+{
+	__shared__ unsigned my_ans[32];
 
+	int N = 16;
+#ifndef MP
+	if(myIdx < N) {
+	  int l1 = myIdx;
+	  int l2 = N+myIdx;
+	  unsigned int output1 = 0, output2 = 0;
+	  for(int i=0; i<N; i++) {
+	    int a = aChunk[i];
+	    int b = (i<=myIdx)? bChunk[l1]: bChunk[l2];
+	    if(i<=myIdx) output1 ^= a&b;
+	    else output2 ^= a&b;
+	    l1--;
+	    l2--;
+	  }
+	  my_ans[myIdx] = output1;
+	  my_ans[myIdx+N] = output2;
+	}
+	__syncthreads();
+#else
+	int lindex = myIdx;
+	int ai = lindex/16;
+	int bi = (lindex/8) & 1;
+
+	int l1 = lindex & 7;
+	int l2 = 8+(lindex & 7);
+	unsigned int output1 = 0, output2 = 0;
+	for(int i=0; i<8; i++) {
+	  int a = aChunk[ai*8 + i];
+	  int b = (i<=(lindex&7))? bChunk[bi*8 + l1]: bChunk[bi*8 + l2];
+	  if(i<=(lindex&7)) output1 ^= a&b;
+	  else output2 ^= a&b;
+	  l1--;
+	  l2--;
+	}
+	my_ans[lindex] = (ai==0)? output1: output2;
+	__syncthreads();
+	if(ai == 0) my_ans[lindex+8] ^= output2;
+	__syncthreads();
+	if(ai == 1) my_ans[lindex-8] ^= output1;
+	__syncthreads();
+#endif
+	if(myIdxInGroup < (N-(N/2)))
+	  {
+  multiplyByPentanomial(&my_ans[N - 1 + ((N)/2)], &my_ans[((N)/2)-1], myIdxInGroup);
+}
+	if(myIdxInGroup < (N/2)-1)
+	  {
+  multiplyByPentanomial(&my_ans[N],&my_ans[0], myIdxInGroup);
+}
+	
+	if(myIdxInGroup < N)
+	  cChunk[myIdxInGroup] = my_ans[myIdxInGroup];
+}
+#else
+template<>
+__device__ inline void finiteFieldMultiply<16>(
+	unsigned int aChunk[32],
+	unsigned int bChunk[32],
+	unsigned int cChunk[32],
+	unsigned int temp[64],
+	unsigned int myIdxInGroup,
+	unsigned int myIdx,
+	unsigned int warpInGroup)
+{
+	__shared__ unsigned my_ans[32];
+
+	int N = 16;
+	int lindex = myIdx;
+	int a_cached = aChunk[lindex];
+	int b_cached = bChunk[lindex];
+
+	int ai = lindex/16;
+	int bi = (lindex/8) & 1;
+
+	int l1 = lindex & 7;
+	int l2 = 8+(lindex & 7);
+	unsigned int output1 = 0, output2 = 0;
+	unsigned mask = __activemask();
+	for(int i=0; i<8; i++) {
+	  int a = __shfl_sync(mask, a_cached, ai*8 + i);
+	  int lane = (i<=(lindex&7))? bi*8 + l1: bi*8 + l2;
+	  int b = __shfl_sync(mask, b_cached, lane);
+	  if(i<=(lindex&7)) output1 ^= a&b;
+	  else output2 ^= a&b;
+	  l1--;
+	  l2--;
+	}
+	my_ans[lindex] = (ai==0)? output1: output2;
+	__syncthreads();
+	if(ai == 0) my_ans[lindex+8] ^= output2;
+	__syncthreads();
+	if(ai == 1) my_ans[lindex-8] ^= output1;
+	__syncthreads();
+		
+	if(myIdxInGroup < (N-(N/2)))
+	  {
+  multiplyByPentanomial(&my_ans[N - 1 + ((N)/2)], &my_ans[((N)/2)-1], myIdxInGroup);
+}
+	if(myIdxInGroup < (N/2)-1)
+	  {
+  multiplyByPentanomial(&my_ans[N],&my_ans[0], myIdxInGroup);
+}
+	
+	if(myIdxInGroup < N)
+	  cChunk[myIdxInGroup] = my_ans[myIdxInGroup];
+}
+#endif
 
 template<unsigned int N>
 __device__ inline void finiteFieldMultiply(
@@ -310,20 +429,20 @@ __device__ inline void finiteFieldMultiply(
 	}
 
 	if(myIdxInGroup < (N-(N/2)))
-	{
-		multiplyByPentanomial(&temp[N - 1 + ((N)/2)], &temp[((N)/2)-1], myIdxInGroup);
-	}
-if(myIdxInGroup < (N/2)-1)
-	{
-		multiplyByPentanomial(&temp[N],&temp[0], myIdxInGroup);
-	}
-
-if(myIdxInGroup < ((N+1)/2))
-	#pragma unroll 2
-	for (unsigned int i = 0 ; i < 2 ; ++i)
-	{
-		cChunk[myIdxInGroup + i*(N/2)] = temp[myIdxInGroup + i*(N/2)];
-	}
+	  {
+	    multiplyByPentanomial(&temp[N - 1 + ((N)/2)], &temp[((N)/2)-1], myIdxInGroup);
+	  }
+	if(myIdxInGroup < (N/2)-1)
+	  {
+	    multiplyByPentanomial(&temp[N],&temp[0], myIdxInGroup);
+	  }
+	
+	if(myIdxInGroup < ((N+1)/2))
+#pragma unroll 2
+	  for (unsigned int i = 0 ; i < 2 ; ++i)
+	    {
+	      cChunk[myIdxInGroup + i*(N/2)] = temp[myIdxInGroup + i*(N/2)];
+	    }
 }
 
 /*
