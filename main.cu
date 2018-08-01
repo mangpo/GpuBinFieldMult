@@ -1,5 +1,5 @@
 #ifndef SIZE
-#define SIZE 384
+#define SIZE 64
 #endif
 
 #ifndef REPETITIONS
@@ -74,6 +74,6 @@ int main(int argc, char* argv[])
 	cudaSetDevice(0);
 	for (unsigned int i = minimalMults ; i <= maximalMults ; ++i)
 	{
-		std::cout << performTest((1<<i)) << std::endl;
+	  std::cout << performTest((1<<i)) << std::endl;
 	}
 }

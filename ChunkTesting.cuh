@@ -63,6 +63,7 @@ float testChunksMultiply(unsigned int size)
 	unsigned int (*chunksA)[ROUNDED(N)];
 	unsigned int (*chunksB)[ROUNDED(N)];
 
+	//printf("size = %ld, %ld\n", size, sizeof(unsigned int)*ROUNDED(N)*size);
 	cudaMalloc(&chunksA, sizeof(unsigned int)*ROUNDED(N)*size);
 	cudaMalloc(&chunksB, sizeof(unsigned int)*ROUNDED(N)*size);
 

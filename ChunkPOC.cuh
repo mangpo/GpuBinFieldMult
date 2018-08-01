@@ -122,6 +122,7 @@ __device__ inline void finiteFieldMultiply(
 	unsigned int myIdxInWarp,
 	unsigned int warpInGroup);
 
+#ifdef SHUFFLE
 template<>
 __device__ inline void finiteFieldMultiply<32>(
 	unsigned int aChunk[64],
@@ -142,12 +143,26 @@ __device__ inline void finiteFieldMultiply<32>(
 	unsigned my_ans[2]={0};
 	int b;
 	unsigned mask = __activemask();
-	for(unsigned k = 0 ; k < WARP_SIZE ; ++k){
-		b= (myIdx>= k);
-		my_ans[0] ^= (b*__shfl_up_sync(mask, a_reg,k)) & __shfl_sync(mask, e_reg,k);
-		my_ans[1] ^= ((1-b)*__shfl_down_sync(mask, a_reg,WARP_SIZE-k))& __shfl_sync(mask, e_reg,k);
-	}
 
+#ifdef MP
+	int l1 = myIdx;
+	int l2 = myIdx + WARP_SIZE;
+	for(unsigned k = 0 ; k < WARP_SIZE ; ++k){
+	  if(myIdx>= k)
+	    my_ans[0] ^= (__shfl_sync(mask, a_reg,l1)) & __shfl_sync(mask, e_reg,k);
+	  else
+	    my_ans[1] ^= (__shfl_sync(mask, a_reg,l2))& __shfl_sync(mask, e_reg,k);
+	  l1--; l2--;
+	}
+#else
+		
+	for(unsigned k = 0 ; k < WARP_SIZE ; ++k){
+	  b= (myIdx>= k);
+	  my_ans[0] ^= (b*__shfl_up_sync(mask, a_reg,k)) & __shfl_sync(mask, e_reg,k);
+	  my_ans[1] ^= ((1-b)*__shfl_down_sync(mask, a_reg,WARP_SIZE-k))& __shfl_sync(mask, e_reg,k);
+	}
+#endif
+	
 	unsigned int c = 0;
 	myIdx = (myIdx + 16) & (WARP_SIZE - 1);
 #pragma unroll 4
@@ -164,9 +179,79 @@ __device__ inline void finiteFieldMultiply<32>(
 		c = (myIdx >= pentanomial[i]) & (myIdx < pentanomial[i] + 16);
 		my_ans[0] ^= (c * __shfl_sync(mask, my_ans[1],myIdx-pentanomial[i]));
 	}
-		cChunk[myIdx] = my_ans[0];
+	cChunk[myIdx] = my_ans[0];
 }
+#else
+template<>
+__device__ inline void finiteFieldMultiply<32>(
+	unsigned int aChunk[64],
+	unsigned int bChunk[64],
+	unsigned int cChunk[64],
+	unsigned int temp[128],
+	unsigned int myIdxInGroup,
+	unsigned int myIdx,
+	unsigned int warpInGroup)
+{
+  __shared__ unsigned my_ans[2][32];
+  
+  for(int i=0; i<2; i++)
+    my_ans[i][myIdx] = 0;
 
+#ifdef MP
+  int l1 = myIdx;
+  int l2 = myIdx+32;
+  for (unsigned int i = 0 ; i < 32 ; ++i)
+    {
+      if (i <= myIdx)
+	{
+	  my_ans[0][myIdx] ^= bChunk[i] & aChunk[l1];
+	}
+      else
+	{
+	  my_ans[1][myIdx] ^= bChunk[i] & aChunk[l2];
+	}
+      l1--; l2--;
+    }
+#else
+    for (unsigned int i = 0 ; i < 32 ; ++i)
+    {
+      if (i <= myIdx)
+	{
+	  my_ans[0][myIdx] ^= bChunk[i] & aChunk[myIdx-i];
+	}
+      else
+	{
+	  my_ans[1][myIdx] ^= bChunk[i] & aChunk[myIdx + 32 - i];
+	}
+    }
+#endif
+__syncthreads();
+  
+  unsigned int c = 0;
+  int b = 0;
+  myIdx = (myIdx + 16) & (WARP_SIZE - 1);
+#pragma unroll 4
+  for(unsigned int i = 0 ; i < 4 ; ++i){
+    b = (myIdx < 16);
+    c = (myIdx >= pentanomial[i]) & (myIdx < pentanomial[i] + 16);
+    
+    //my_ans[1] ^= ( b * c *__shfl_sync(mask, my_ans[1],16+myIdx-pentanomial[i]));
+    //my_ans[0]^=((1-b)* c *__shfl_sync(mask, my_ans[1],pentanomial[i]));
+    my_ans[1][myIdx] ^= ( b * c *my_ans[1][16+myIdx-pentanomial[i]]);
+    my_ans[0][myIdx] ^=((1-b)* c *my_ans[1][pentanomial[i]]);
+  }
+  __syncthreads();
+  myIdx = (myIdx + 16) & (WARP_SIZE - 1);
+#pragma unroll 4
+  for(unsigned int i = 0 ; i < 4 ; ++i){
+    c = (myIdx >= pentanomial[i]) & (myIdx < pentanomial[i] + 16);
+    //my_ans[0] ^= (c * __shfl_sync(mask, my_ans[1],myIdx-pentanomial[i]));
+    my_ans[0][myIdx] ^= (c * my_ans[1][myIdx-pentanomial[i]]);
+  }
+  cChunk[myIdx] = my_ans[0][myIdx];
+
+}
+#endif
 
 
 
