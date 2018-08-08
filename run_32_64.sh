@@ -1,4 +1,4 @@
-for s in 32
+for s in 32 64
 do
     echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>> DEG = " $s ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
     nvcc main.cu ChunkTesting.o -o main -DSIZE=$s -gencode arch=compute_30,code=sm_30
